@@ -76,12 +76,12 @@ BUILDER_DATA_DIR="/home/pi/intmax2"
 
 | Page | Description |
 |------|-------------|
-| [About INTMAX](../../wiki/About-INTMAX) | Block Builder overview, setup, and reward structure |
-| [Server Setup](../../wiki/Setup-Server) | Prometheus + Grafana setup |
-| [Node Setup](../../wiki/Setup-Node) | Agent setup for each node |
-| [Rewards](../../wiki/Rewards) | Reward monitoring and automatic collection |
-| [Raspberry Pi](../../wiki/Raspberry-Pi) | Compatible models and notes |
-| [Troubleshooting](../../wiki/Troubleshooting) | Common issues and solutions |
+| [About INTMAX](https://github.com/Taiyou/intmax-node-monitoring-en/wiki/About-INTMAX) | Block Builder overview, setup, and reward structure |
+| [Server Setup](https://github.com/Taiyou/intmax-node-monitoring-en/wiki/Setup-Server) | Prometheus + Grafana setup |
+| [Node Setup](https://github.com/Taiyou/intmax-node-monitoring-en/wiki/Setup-Node) | Agent setup for each node |
+| [Rewards](https://github.com/Taiyou/intmax-node-monitoring-en/wiki/Rewards) | Reward monitoring and automatic collection |
+| [Raspberry Pi](https://github.com/Taiyou/intmax-node-monitoring-en/wiki/Raspberry-Pi) | Compatible models and notes |
+| [Troubleshooting](https://github.com/Taiyou/intmax-node-monitoring-en/wiki/Troubleshooting) | Common issues and solutions |
 
 ## Structure
 
