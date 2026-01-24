@@ -24,7 +24,7 @@ INTMAX Block Builder is infrastructure that supports the INTMAX network by aggre
 
 - [INTMAX Official](https://intmax.io)
 - [Block Builder GitHub](https://github.com/InternetMaximalism/intmax2)
-- [Documentation](https://docs.intmax.io)
+- [Documentation](https://docs.network.intmax.io/)
 
 ---
 
