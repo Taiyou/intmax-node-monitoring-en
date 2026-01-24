@@ -2,28 +2,30 @@
 set -euo pipefail
 
 #=============================================================================
-# INTMAX Builder Monitoring Agent - Installation Script
+# INTMAX Builder Monitoring Agent - Install Script
 #
-# Installs:
-# - node_exporter (Prometheus metrics exporter)
-# - intmax_builder_metrics.sh (custom metrics collection)
-# - cron job (metrics update every minute)
+# - node_exporter のインストール (systemd)
+# - textfile collector ディレクトリ作成
+# - メトリクス収集スクリプトの cron 設定
 #=============================================================================
 
-# node_exporter version
-NODE_EXPORTER_VERSION="1.8.2"
+NODE_EXPORTER_VERSION="${NODE_EXPORTER_VERSION:-1.7.0}"
 TEXTFILE_DIR="/var/lib/node_exporter/textfile_collector"
+INSTALL_DIR="/opt/intmax-monitoring"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+METRICS_SCRIPT="${SCRIPT_DIR}/intmax_builder_metrics.sh"
+CRON_INTERVAL="${CRON_INTERVAL:-1}"  # 分単位
 
-# Colored output
+# 色付き出力
 info()  { echo -e "\033[1;34m[INFO]\033[0m $*"; }
 ok()    { echo -e "\033[1;32m[OK]\033[0m $*"; }
 warn()  { echo -e "\033[1;33m[WARN]\033[0m $*"; }
 error() { echo -e "\033[1;31m[ERROR]\033[0m $*"; exit 1; }
 
-# Root check
-[[ $EUID -eq 0 ]] || error "Please run with root privileges: sudo $0"
+# root チェック
+[[ $EUID -eq 0 ]] || error "root 権限で実行してください: sudo $0"
 
-# Architecture detection
+# アーキテクチャ検出
 detect_arch() {
     local arch
     arch=$(uname -m)
@@ -31,59 +33,60 @@ detect_arch() {
         x86_64)  echo "amd64" ;;
         aarch64) echo "arm64" ;;
         armv7l)  echo "armv7" ;;
-        *)       error "Unsupported architecture: $arch" ;;
+        armv6l)  echo "armv6" ;;
+        *)       error "未対応のアーキテクチャ: $arch" ;;
     esac
 }
 
-# Create node_exporter user
+# node_exporter 用ユーザー作成
 create_user() {
     if ! id -u node_exporter &>/dev/null; then
+        info "node_exporter ユーザーを作成中..."
         useradd --no-create-home --shell /bin/false node_exporter
-        ok "Created node_exporter user"
+        ok "node_exporter ユーザーを作成しました"
     fi
 }
 
-# Install node_exporter
+# node_exporter インストール
 install_node_exporter() {
-    if [[ -f /usr/local/bin/node_exporter ]]; then
-        warn "node_exporter is already installed"
+    if command -v node_exporter &>/dev/null; then
+        warn "node_exporter は既にインストールされています"
+        node_exporter --version
         return 0
     fi
 
     local arch
     arch=$(detect_arch)
-    local url="https://github.com/prometheus/node_exporter/releases/download/v${NODE_EXPORTER_VERSION}/node_exporter-${NODE_EXPORTER_VERSION}.linux-${arch}.tar.gz"
+    local filename="node_exporter-${NODE_EXPORTER_VERSION}.linux-${arch}"
+    local url="https://github.com/prometheus/node_exporter/releases/download/v${NODE_EXPORTER_VERSION}/${filename}.tar.gz"
 
-    info "Downloading node_exporter (v${NODE_EXPORTER_VERSION}, ${arch})..."
+    info "node_exporter v${NODE_EXPORTER_VERSION} (${arch}) をダウンロード中..."
     cd /tmp
     curl -fsSL "$url" -o node_exporter.tar.gz
     tar xzf node_exporter.tar.gz
-    cp "node_exporter-${NODE_EXPORTER_VERSION}.linux-${arch}/node_exporter" /usr/local/bin/
+    mv "${filename}/node_exporter" /usr/local/bin/
+    rm -rf node_exporter.tar.gz "${filename}"
     chmod +x /usr/local/bin/node_exporter
-    rm -rf node_exporter.tar.gz "node_exporter-${NODE_EXPORTER_VERSION}.linux-${arch}"
 
-    ok "node_exporter installed"
+    ok "node_exporter を /usr/local/bin にインストールしました"
 }
 
-# Configure systemd service
-setup_systemd() {
-    info "Configuring systemd service..."
+# systemd サービス作成
+create_systemd_service() {
+    info "systemd サービスを作成中..."
 
-    # Create textfile collector directory
-    mkdir -p "$TEXTFILE_DIR"
-    chown node_exporter:node_exporter "$TEXTFILE_DIR"
-
-    cat > /etc/systemd/system/node_exporter.service << 'EOF'
+    cat > /etc/systemd/system/node_exporter.service << EOF
 [Unit]
-Description=Node Exporter
-Wants=network-online.target
+Description=Prometheus Node Exporter
 After=network-online.target
+Wants=network-online.target
 
 [Service]
 User=node_exporter
 Group=node_exporter
 Type=simple
-ExecStart=/usr/local/bin/node_exporter --collector.textfile.directory=/var/lib/node_exporter/textfile_collector
+ExecStart=/usr/local/bin/node_exporter \\
+    --collector.textfile.directory=${TEXTFILE_DIR}
 Restart=always
 RestartSec=5
 
@@ -95,96 +98,72 @@ EOF
     systemctl enable node_exporter
     systemctl start node_exporter
 
-    ok "systemd service configured and started"
+    ok "node_exporter サービスを起動しました"
 }
 
-# Copy metrics script
-copy_scripts() {
-    local script_dir
-    script_dir=$(dirname "$(readlink -f "$0")")
+# textfile collector ディレクトリ作成
+setup_textfile_dir() {
+    info "textfile collector ディレクトリを作成中..."
+    mkdir -p "$TEXTFILE_DIR"
+    chown node_exporter:node_exporter "$TEXTFILE_DIR"
+    ok "ディレクトリ作成完了: $TEXTFILE_DIR"
+}
 
-    info "Copying metrics script..."
-
-    # Determine destination directory
-    local dest_dir="/opt/intmax-monitoring"
-    mkdir -p "$dest_dir"
-
-    # Copy script
-    if [[ -f "${script_dir}/intmax_builder_metrics.sh" ]]; then
-        cp "${script_dir}/intmax_builder_metrics.sh" "$dest_dir/"
-        chmod +x "$dest_dir/intmax_builder_metrics.sh"
-        ok "Script copied"
-    else
-        error "intmax_builder_metrics.sh not found in ${script_dir}"
+# スクリプトをインストールディレクトリにコピー
+install_scripts() {
+    info "スクリプトをインストール中..."
+    mkdir -p "$INSTALL_DIR"
+    
+    # メイン監視スクリプト
+    cp "$METRICS_SCRIPT" "$INSTALL_DIR/"
+    chmod +x "$INSTALL_DIR/intmax_builder_metrics.sh"
+    
+    # アンインストールスクリプト
+    if [[ -f "${SCRIPT_DIR}/uninstall.sh" ]]; then
+        cp "${SCRIPT_DIR}/uninstall.sh" "$INSTALL_DIR/"
+        chmod +x "$INSTALL_DIR/uninstall.sh"
     fi
+    
+    ok "スクリプトを $INSTALL_DIR にインストールしました"
 }
 
-# Setup cron job
+# cron ジョブ設定
 setup_cron() {
-    info "Setting up cron job..."
-
-    local cron_entry="* * * * * /opt/intmax-monitoring/intmax_builder_metrics.sh > /dev/null 2>&1 # intmax-builder-metrics"
-
-    # Remove existing entry if present
-    crontab -l 2>/dev/null | grep -v "intmax-builder-metrics" | crontab - 2>/dev/null || true
-
-    # Add new entry
-    (crontab -l 2>/dev/null || true; echo "$cron_entry") | crontab -
-
-    ok "cron job configured"
+    info "cron ジョブを設定中..."
+    
+    # メトリクス収集スクリプト（1分間隔）
+    local metrics_cron_line="*/${CRON_INTERVAL} * * * * ${INSTALL_DIR}/intmax_builder_metrics.sh"
+    local metrics_cron_marker="# intmax-builder-metrics"
+    (crontab -l 2>/dev/null | grep -v "$metrics_cron_marker" || true; echo "${metrics_cron_line} ${metrics_cron_marker}") | crontab -
+    ok "メトリクス収集 cron ジョブを設定しました (${CRON_INTERVAL}分間隔)"
 }
 
-# Create default config file
-create_default_config() {
-    local config_file="/etc/default/intmax-builder-metrics"
-
-    if [[ -f "$config_file" ]]; then
-        warn "Config file already exists: $config_file"
-        return 0
-    fi
-
-    info "Creating default config file..."
-
-    cat > "$config_file" << 'EOF'
-# INTMAX Builder Monitoring Agent Configuration
-#
-# NODE_NAME: Name displayed in Grafana (e.g., builder-01)
-# BUILDER_CONTAINER_NAME: Docker container name (partial match OK)
-# BUILDER_DATA_DIR: intmax2 data directory
-
-NODE_NAME="builder-01"
-BUILDER_CONTAINER_NAME="block-builder"
-BUILDER_DATA_DIR="/home/pi/intmax2"
-EOF
-
-    ok "Default config file created: $config_file"
-}
-
-# Main process
+# メイン処理
 main() {
     echo "========================================"
     echo " INTMAX Builder Monitoring Agent"
-    echo " Installation"
     echo "========================================"
     echo
 
     create_user
     install_node_exporter
-    setup_systemd
-    copy_scripts
-    create_default_config
+    setup_textfile_dir
+    create_systemd_service
+    install_scripts
     setup_cron
 
-    # Run metrics collection once
-    /opt/intmax-monitoring/intmax_builder_metrics.sh 2>/dev/null || true
-
     echo
-    ok "Installation complete!"
+    ok "インストール完了!"
     echo
-    info "Next steps:"
-    echo "  1. Edit config file: sudo nano /etc/default/intmax-builder-metrics"
-    echo "  2. Verify metrics: curl localhost:9100/metrics | grep intmax"
+    info "確認コマンド:"
+    echo "  systemctl status node_exporter"
+    echo "  curl -s localhost:9100/metrics | grep intmax"
     echo
+    info "インストール先: ${INSTALL_DIR}"
+    echo
+    info "次のステップ:"
+    echo "  1. /etc/default/intmax-builder-metrics を編集して設定"
+    echo "  2. Prometheus サーバーからこのノードの 9100 ポートにアクセスできることを確認"
 }
 
 main "$@"
