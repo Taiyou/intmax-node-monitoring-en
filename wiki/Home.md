@@ -53,42 +53,126 @@ To monitor ETH rewards and wallet balance, refer to [Rewards](Rewards).
 
 ## Table of Contents
 
+### Getting Started
 | Page | Description |
 |------|-------------|
 | [About INTMAX Block Builder](About-INTMAX) | Block Builder overview, setup, and reward structure |
 | [Server Setup](Setup-Server) | Prometheus + Grafana setup |
 | [Node Setup](Setup-Node) | Agent setup for each node |
+
+### Operations
+| Page | Description |
+|------|-------------|
 | [Rewards](Rewards) | Reward monitoring and automatic collection |
+| [Metrics Reference](Metrics) | Complete list of collected metrics and PromQL examples |
+| [Upgrading](Upgrading) | How to upgrade the monitoring system |
+
+### Reference
+| Page | Description |
+|------|-------------|
+| [Security Best Practices](Security) | Security recommendations and hardening |
 | [Raspberry Pi](Raspberry-Pi) | Compatible models and notes |
-| [Troubleshooting](Troubleshooting) | Common issues and solutions |
+| [Troubleshooting & FAQ](Troubleshooting) | Common issues, solutions, and FAQ |
 
 ## System Architecture
 
 ```
-                    ┌─────────────────────────────────────┐
-                    │         Monitoring Server           │
-                    │  ┌───────────┐  ┌───────────┐      │
-                    │  │ Prometheus │  │  Grafana  │      │
-                    │  └─────┬─────┘  └───────────┘      │
-                    │        │                            │
-                    │  ┌─────┴─────┐                      │
-                    │  │ Exporters │                      │
-                    │  │ - wallet  │                      │
-                    │  │ - reward  │                      │
-                    │  └───────────┘                      │
-                    └────────┬────────────────────────────┘
-                             │ scrape (HTTP)
-         ┌───────────────────┼───────────────────┐
-         │                   │                   │
-         ▼                   ▼                   ▼
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│   Node 1        │ │   Node 2        │ │   Node N        │
-│ ┌─────────────┐ │ │ ┌─────────────┐ │ │ ┌─────────────┐ │
-│ │ Block       │ │ │ │ Block       │ │ │ │ Block       │ │
-│ │ Builder     │ │ │ │ Builder     │ │ │ │ Builder     │ │
-│ └─────────────┘ │ │ └─────────────┘ │ │ └─────────────┘ │
-│ ┌─────────────┐ │ │ ┌─────────────┐ │ │ ┌─────────────┐ │
-│ │node_exporter│ │ │ │node_exporter│ │ │ │node_exporter│ │
-│ └─────────────┘ │ │ └─────────────┘ │ │ └─────────────┘ │
-└─────────────────┘ └─────────────────┘ └─────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            Monitoring Server                                 │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                         Docker Compose                               │   │
+│  │                                                                      │   │
+│  │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐  │   │
+│  │  │   Prometheus    │    │     Grafana     │    │ Wallet Exporter │  │   │
+│  │  │   (port 9090)   │◄───│   (port 3000)   │    │   (port 9101)   │  │   │
+│  │  │                 │    │                 │    │                 │  │   │
+│  │  │  • Time series  │    │  • Dashboards   │    │  • ETH balance  │  │   │
+│  │  │  • Alert rules  │    │  • Alerts       │    │  • sITX balance │  │   │
+│  │  │  • 90d retention│    │  • Graphs       │    │  • Scroll RPC   │  │   │
+│  │  └────────┬────────┘    └─────────────────┘    └────────┬────────┘  │   │
+│  │           │                                              │           │   │
+│  │           │  Scrape every 15 seconds                     │ HTTP/RPC  │   │
+│  │           │                                              │           │   │
+│  │  ┌────────┴────────┐                           ┌────────▼────────┐  │   │
+│  │  │ Reward Exporter │                           │  Scroll Network │  │   │
+│  │  │   (port 9102)   │                           │                 │  │   │
+│  │  │                 │                           │  (Blockchain)   │  │   │
+│  │  │  • SSH to nodes │                           └─────────────────┘  │   │
+│  │  │  • CLI balance  │                                                │   │
+│  │  └────────┬────────┘                                                │   │
+│  │           │ SSH                                                     │   │
+│  └───────────┼─────────────────────────────────────────────────────────┘   │
+│              │                                                              │
+└──────────────┼──────────────────────────────────────────────────────────────┘
+               │
+               │ Metrics scrape (HTTP :9100)
+               │
+    ┌──────────┴──────────┬───────────────────┬───────────────────┐
+    │                     │                   │                   │
+    ▼                     ▼                   ▼                   ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌───────────┐
+│   Node 1        │ │   Node 2        │ │   Node 3        │ │  Node N   │
+│ ┌─────────────┐ │ │ ┌─────────────┐ │ │ ┌─────────────┐ │ │           │
+│ │Block Builder│ │ │ │Block Builder│ │ │ │Block Builder│ │ │    ...    │
+│ │  (Docker)   │ │ │ │  (Docker)   │ │ │ │  (Docker)   │ │ │           │
+│ └─────────────┘ │ │ └─────────────┘ │ │ └─────────────┘ │ │           │
+│ ┌─────────────┐ │ │ ┌─────────────┐ │ │ ┌─────────────┐ │ │           │
+│ │node_exporter│ │ │ │node_exporter│ │ │ │node_exporter│ │ │           │
+│ │ (port 9100) │ │ │ │ (port 9100) │ │ │ │ (port 9100) │ │ │           │
+│ └─────────────┘ │ │ └─────────────┘ │ │ └─────────────┘ │ │           │
+│ ┌─────────────┐ │ │ ┌─────────────┐ │ │ ┌─────────────┐ │ │           │
+│ │Metrics Cron │ │ │ │Metrics Cron │ │ │ │Metrics Cron │ │ │           │
+│ │ (1-5 min)   │ │ │ │ (1-5 min)   │ │ │ │ (1-5 min)   │ │ │           │
+│ └─────────────┘ │ │ └─────────────┘ │ │ └─────────────┘ │ │           │
+└─────────────────┘ └─────────────────┘ └─────────────────┘ └───────────┘
 ```
+
+## Data Flow
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                              Data Flow                                      │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                            │
+│  1. Node Metrics Collection (every 1-5 minutes)                            │
+│     ┌──────────────────┐     ┌──────────────────┐     ┌────────────────┐  │
+│     │ intmax_builder_  │     │ node_exporter    │     │ Prometheus     │  │
+│     │ metrics.sh       │────▶│ textfile_collector│────▶│ (scrape)       │  │
+│     │ (cron job)       │     │ (:9100/metrics)  │     │                │  │
+│     └──────────────────┘     └──────────────────┘     └────────────────┘  │
+│                                                                            │
+│  2. Wallet Balance (every hour)                                            │
+│     ┌──────────────────┐     ┌──────────────────┐     ┌────────────────┐  │
+│     │ Scroll Network   │     │ wallet-exporter  │     │ Prometheus     │  │
+│     │ (JSON-RPC)       │◀────│ eth_getBalance   │────▶│ (scrape)       │  │
+│     │                  │     │ balanceOf(sITX)  │     │                │  │
+│     └──────────────────┘     └──────────────────┘     └────────────────┘  │
+│                                                                            │
+│  3. Reward Balance (every hour)                                            │
+│     ┌──────────────────┐     ┌──────────────────┐     ┌────────────────┐  │
+│     │ Builder Nodes    │     │ reward-exporter  │     │ Prometheus     │  │
+│     │ (INTMAX CLI)     │◀────│ SSH + balance cmd│────▶│ (scrape)       │  │
+│     │                  │     │                  │     │                │  │
+│     └──────────────────┘     └──────────────────┘     └────────────────┘  │
+│                                                                            │
+│  4. Visualization                                                          │
+│     ┌──────────────────┐     ┌──────────────────┐                         │
+│     │ Prometheus       │     │ Grafana          │                         │
+│     │ (Time series DB) │────▶│ (Dashboards)     │────▶  User Browser      │
+│     │                  │     │                  │                         │
+│     └──────────────────┘     └──────────────────┘                         │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Component Details
+
+| Component | Port | Purpose | Update Interval |
+|-----------|------|---------|-----------------|
+| Prometheus | 9090 | Time series database, alert evaluation | 15s scrape |
+| Grafana | 3000 | Dashboard visualization | Real-time |
+| Wallet Exporter | 9101 | Fetch ETH/sITX wallet balance from Scroll | 1 hour |
+| Reward Exporter | 9102 | Fetch pending rewards via SSH | 1 hour |
+| node_exporter | 9100 | System and custom metrics | 15s scrape |
+| Metrics Cron | - | Docker/process status collection | 1-5 min |
