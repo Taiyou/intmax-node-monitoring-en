@@ -11,7 +11,8 @@
 # Prerequisites:
 #   - SSH key authentication to each node
 #   - INTMAX CLI installed on each node
-#   - spend-key file accessible on each node
+#   - eth-private-key file accessible on each node (for claiming rewards)
+#   - spend-key file accessible on each node (for checking balance)
 #=============================================================================
 
 set -euo pipefail
@@ -55,15 +56,15 @@ echo
 
 # Process each node
 for node_config in "${NODES[@]}"; do
-    # Parse config: user@host:cli_dir:spend_key_file
-    IFS=':' read -r ssh_target cli_dir spend_key_file <<< "$node_config"
+    # Parse config: user@host:cli_dir:eth_private_key_file
+    IFS=':' read -r ssh_target cli_dir eth_private_key_file <<< "$node_config"
 
     info "Processing: $ssh_target"
 
-    # Get spend key
-    spend_key=$(ssh "$ssh_target" "cat $spend_key_file" 2>/dev/null)
-    if [[ -z "$spend_key" ]]; then
-        warn "  Failed to read spend-key from $spend_key_file"
+    # Get ETH private key (for claiming rewards)
+    eth_private_key=$(ssh "$ssh_target" "cat $eth_private_key_file" 2>/dev/null)
+    if [[ -z "$eth_private_key" ]]; then
+        warn "  Failed to read eth-private-key from $eth_private_key_file"
         continue
     fi
 
@@ -73,7 +74,7 @@ for node_config in "${NODES[@]}"; do
     # Run claim command
     info "  Executing claim..."
     # Execute from cli directory where .env file is located
-    if ssh "$ssh_target" "bash -c 'cd ${cli_dir}/cli && $binary_path claim-builder-reward --eth-private-key $spend_key'" 2>&1; then
+    if ssh "$ssh_target" "bash -c 'cd ${cli_dir}/cli && $binary_path claim-builder-reward --eth-private-key $eth_private_key'" 2>&1; then
         ok "  Claim successful"
     else
         warn "  Claim may have failed (check logs)"
