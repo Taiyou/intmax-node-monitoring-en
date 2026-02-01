@@ -72,7 +72,8 @@ for node_config in "${NODES[@]}"; do
 
     # Run claim command
     info "  Executing claim..."
-    if ssh "$ssh_target" "cd $cli_dir && $binary_path claim --private-key $spend_key" 2>&1; then
+    # Execute from cli directory where .env file is located
+    if ssh "$ssh_target" "bash -c 'cd ${cli_dir}/cli && $binary_path claim-builder-reward --eth-private-key $spend_key'" 2>&1; then
         ok "  Claim successful"
     else
         warn "  Claim may have failed (check logs)"

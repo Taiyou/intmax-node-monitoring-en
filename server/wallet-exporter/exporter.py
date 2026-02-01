@@ -57,7 +57,10 @@ def rpc_call(method: str, params: list) -> dict:
     req = urllib.request.Request(
         SCROLL_RPC_URL,
         data=data,
-        headers={'Content-Type': 'application/json'}
+        headers={
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
     )
     
     try:
